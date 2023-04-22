@@ -5,42 +5,30 @@ import argparse
 import json
 import requests
 import subprocess
+import toml
+from urllib.parse import urlencode
+import webbrowser
+
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
         prog="spotify_playlists", description="Get Spotify playlists"
     )
     parser.add_argument(
-        "token_file",
+        "config_file",
         type=str,
-        help="Path to file containing github access token with repository permissions",
+        help="Path to configuration file",
     )
     parser.add_argument("user", type=str, help="Spotify account user name")
 
     return parser.parse_args()
 
 
-def get_token(token_file):
-    with open(token_file, "r") as token_file:
-        return token_file.readline().rstrip("\n")
+def read_config_file(config_file):
+    return toml.load(config_file)
 
 
-def get_repos_from_api(repo_list, api_response):
-    repos = api_response.json()
-    if repos == []:
-        return False
-
-    for repo in repos:
-        tmp_dict = {}
-        tmp_dict["name"] = repo["name"]
-        tmp_dict["html_url"] = repo["html_url"]
-        tmp_dict["private"] = repo["private"]
-        repo_list.append(tmp_dict)
-
-    return True
-
-
-def get_all_repos_from_user(user, token):
+def get_all_repos_from_user(user, client_id):
 
     # try to get max number of pages
     # check: https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28
@@ -53,7 +41,8 @@ def get_all_repos_from_user(user, token):
     # get all other repo pages
     while get_next_page == True:
         get_next_page = get_repos_from_api(
-            repos, requests.get(user_repos_endpoint, auth=(user, token), params=params)
+            repos,
+            requests.get(user_repos_endpoint, auth=(user, client_id), params=params),
         )
         # next iteration: get next page
         params["page"] = params["page"] + 1
@@ -61,10 +50,31 @@ def get_all_repos_from_user(user, token):
     return repos
 
 
+def request_user_authorization(client_id, scopes):
+    endpoint = "https://accounts.spotify.com/authorize"
+    params = {
+        "client_id": client_id,
+        "response_type": "code",
+        "redirect_uri": "http://localhost:3000",
+        "scope": scopes,
+    }
+
+    print("First time access instructions:")
+    print("1. Login to Spotify and agree")
+    print("2. Copy the code=<auth_code> from the redirect url into .toml file")
+    print("3. Run the script again")
+
+    webbrowser.open(f"{endpoint}?{urlencode(params)}")
+
+
 if __name__ == "__main__":
     print("Get Spotify playlists")
 
     args = parse_arguments()
+    config = read_config_file(args.config_file)
+    print(config)
 
-    token = get_token(args.token_file)
-    print(f"Token: {token}\nUser: {args.user}")
+    # scopes = "playlist-read-private playlist-read-collaborative"
+    # request authorization code if not set
+    if not config["auth_code"]:
+        request_user_authorization(config["client_id"], config["scopes"])

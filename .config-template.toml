@@ -1,0 +1,4 @@
+client_id = "<Spotify Application Client ID>"
+client_secret = "<Spotify Application Client Secret>"
+auth_code = "<Authorization Code: run script for the first time and follow instructions>"
+scopes = "playlist-read-private playlist-read-collaborative"
