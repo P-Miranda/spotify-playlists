@@ -2,6 +2,7 @@
 # Python script to get playlists from Spotify user
 
 import argparse
+import base64
 import json
 import requests
 import subprocess
@@ -26,6 +27,12 @@ def parse_arguments():
 
 def read_config_file(config_file):
     return toml.load(config_file)
+
+
+def write_config(config, filename):
+    toml_string = toml.dumps(config)
+    with open(filename, "w") as f:
+        f.write(toml_string)
 
 
 def get_all_repos_from_user(user, client_id):
@@ -67,14 +74,92 @@ def request_user_authorization(client_id, scopes):
     webbrowser.open(f"{endpoint}?{urlencode(params)}")
 
 
+def encode_credentials(config):
+    return base64.b64encode(
+        config["client_id"].encode() + b":" + config["client_secret"].encode()
+    ).decode("utf-8")
+
+
+def request_access_token(config, config_file):
+    endpoint = "https://accounts.spotify.com/api/token"
+    header = {
+        "Authorization": "Basic " + encode_credentials(config),
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    params = {
+        "grant_type": "authorization_code",
+        "code": config["auth_code"],
+        "redirect_uri": "http://localhost:3000",
+    }
+    response = requests.post(endpoint, headers=header, data=params)
+    response_json = response.json()
+
+    # print(response_json)
+    if response_json:
+        config["access_token"] = response_json["access_token"]
+        config["refresh_token"] = response_json["refresh_token"]
+        write_config(config, config_file)
+
+
+def refresh_access_token(config, config_file):
+    endpoint = "https://accounts.spotify.com/api/token"
+    header = {
+        "Authorization": "Basic " + encode_credentials(config),
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    params = {
+        "grant_type": "refresh_token",
+        "refresh_token": config["refresh_token"],
+    }
+    response = requests.post(endpoint, headers=header, data=params)
+    response_json = response.json()
+    # print(response_json)
+    if response_json:
+        config["access_token"] = response_json["access_token"]
+        write_config(config, config_file)
+
+
+def get_playlist_info(config):
+    endpoit = "https://api.spotify.com/v1/me/playlists"
+    header = {
+        "Authorization": "Bearer " + config["access_token"],
+    }
+    params = {
+        "limit": 50,
+        "offset": 0,
+    }
+    response = requests.get(endpoit, headers=header, params=params)
+    response_json = response.json()
+    # print(response_json)
+    with open("playlists.json", "w") as f:
+        json.dump(response_json, f, indent=4)
+
+    playlist_info_from_json(response_json)
+
+
+def playlist_info_from_json(json_data):
+    for playlist in json_data["items"]:
+        print(f'{playlist["name"]}: {playlist["tracks"]["total"]} tracks')
+
+
 if __name__ == "__main__":
     print("Get Spotify playlists")
 
     args = parse_arguments()
     config = read_config_file(args.config_file)
-    print(config)
+    # print(config)
 
-    # scopes = "playlist-read-private playlist-read-collaborative"
-    # request authorization code if not set
-    if not config["auth_code"]:
-        request_user_authorization(config["client_id"], config["scopes"])
+    # Initial setup: obtain access and refresh tokens
+    if not config["refresh_token"]:
+        # request authorization code if not set: 1st run
+        if not config["auth_code"]:
+            request_user_authorization(config["client_id"], config["scopes"])
+        # request access and refresh tokens: 2nd run
+        else:
+            request_access_token(config, args.config_file)
+    # Regular run: check for valid access token or refresh
+    else:
+        refresh_access_token(config, args.config_file)
+
+    # Regular operation:
+    get_playlist_info(config)
